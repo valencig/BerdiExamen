@@ -1,0 +1,908 @@
+---
+title: "Examen Final Estadística Computacional"
+date: "3/12/2019"
+output: html_document
+---
+
+### Autores:
+
+#### Miguel Ángel Ávila del Bosque 61100
+#### Mario Alberto Cruz García 123808
+#### Javier Valencia Goujón 123227
+
+
+### Instrucciones: 
+
++ El examen debe ser resuelto en grupos de 3 personas.
++ El examen consta de 4 preguntas. 
++ Las respuestas a las preguntas deben ser claras y deben incluir procedimiento y código en R de manera ordenada y comentado. 
++ Las respuestas deben de enviarse en dos archivos: uno en formato .Rmd y el correspondiente archivo compilado en formato .html. El nombre de los archivos debe ser “Examen_Parcial_ClaveUnica” con la clave única de un solo alumno.
++ Los archivos deben incluir los nombres y claves únicas de los alumnos al inicio de los mismos. 
++ Los archivos deben enviarse por correo electrónico a la dirección *leonb@itam.mx*.
+
+### 1. Relación entre Bootstrap e Inferencia Bayesiana
+
+Consideremos el caso en que tenemos una única observación $x$ proveniente de una distribución normal
+$$x\sim N(\theta,1)$$
+
+Supongamos ahora que elegimos una distribución inicial Normal
+$$\theta \sim N(0,\tau)$$
+
+dando lugar a la distribución posterior
+$$\theta|x \sim N\left(\frac{x}{1+1/\tau},\frac{1}{1+1/\tau}\right)$$
+
+Ahora, entre mayor es $\tau$, más se concentra la distribución posterior en el estimador de máxima verosimilitud $\hat{\theta}=x$. En el límite cuando $\tau\rightarrow\infty$ obtenemos una distribución inicial no-informativa (uniforme) y, en este límite, la distribución posterior es
+$$\theta|x \sim N(x,1)$$
+
+Esta distribución posterior coincide con la distribución de bootstrap paramétrico en la que se generaron valores $x^*$ de $N(x,1)$, donde $x$ es el estimador de máxima verosimilitud.
+
+La propiedad anterior se cumple debido a que utilizamos un ejemplo de distribuciones conjugadas Normales, pero también se cumple aproximadamente en otros casos, lo que conlleva a una correspondencia entre el bootstrap paramétrico y la inferencia Bayesiana. 
+
+En este caso, la distribución bootstrap representa (aproximadamente) una distribución posterior no-informativa del parámetro de interés. Mediante la perturbación en los datos, el bootstrap aproxima el efecto Bayesiano de perturbar los parámetros, con la ventaja de ser más simple de implementar (en muchos casos). Los detalles se pueden leer en _The Elements of Statistical Learning_ de Hastie y Tibshirani.
+
+Supongamos que observamos una muestra con $n$ datos tal que $x_1,\ldots,x_n \sim N(0,\sigma^2)$, es decir, los datos sin *i.i.d* y provienen de una distribución Normal con media cero y varianza desconocida.
+
+En los puntos 1.1 y 1.2 buscamos hacer inferencia del parámetro $\sigma^2$.
+
+### Librerías
+
+```{r warning=FALSE}
+library(R2jags)
+library(tidyverse)
+library(gridExtra)
+library(grid)
+library(ggplot2)
+library(lattice)
+```
+
+
+### 1.1 Bootstrap paramétrico.
+
+a. Escribe la función de verosimilitud y calcula analíticamente el estimador de máxima verosimilitud de $\sigma^2$. 
+
+_La **función de verosimilitud** dados los datos es:_
+
+$$\mathcal{L}(\sigma^2|x_1,...,x_n)=\prod_{i=1}^n p(x_i;\sigma^2)=\prod_{i=1}^n \frac{1}{\sqrt{2\pi\sigma^2}}e^{-\frac{x_i^2}{2\sigma^2}} = \frac{1}{(2\pi\sigma^2)^{n/2}} e^{\big( -\frac{1}{2\sigma^2}\sum_{i=1}^n x_i^2\big)}$$
+_Para hallar el estimador de máxima verosimilitud de $\sigma^2$, se debe encontrar el valor_ $\sigma^*$ _que es el valor que maximiza la función_ $\mathcal{L}(\sigma^2|x_1,...,x_n)$. _Para esto se aplica una tranformación logarítmica que no afecta el resultado del problema y facilita los cálculos para encontrar el parámatro. Por lo que da lo mismo maximizar la función de *log-verosimilitud*._
+
+_La **log-verosimilitud** es:_ 
+
+$$\mathcal{l}(\sigma^2|x_1,...,x_n)=\log (\mathcal{L}(\sigma^2|x_1,...,x_n))= \sum_{i=1}^n \log \Big(\frac{1}{\sqrt{2\pi\sigma^2}}e^{-\frac{x_i^2}{2\sigma^2}}\Big)$$
+$$\mathcal{l}(\sigma^2|x_1,...,x_n)= \sum_{i=1}^n \Big[ \log \Big(\frac{1}{\sqrt{2\pi}}\Big)+ \Big(\frac{1}{2}\Big)log \Big(\frac{1}{\sigma^2}\Big) - \frac{x_i^2}{2\sigma^2} \Big]$$
+$$\mathcal{l}(\sigma^2|x_1,...,x_n)= (n) log \Big(\frac{1}{\sqrt{2\pi}}\Big) + \Big(\frac{n}{2}\Big)log \Big(\frac{1}{\sigma^2}\Big) - \sum_{i=1}^n \frac{x_i^2}{2\sigma^2}$$
+
+_Ahora se procede a buscar el **estimador de máxima verosimilitud** a través de puntos críticos, es decir la primera derivada de la función_ $\mathcal{l}(\sigma^2|x_1,...,x_n)$ _con respecto a_ $\sigma^2$. _Se tiene que:_
+
+
+$$\frac{\partial\mathcal{l}(\sigma^2|x_1,...,x_n)}{\partial \sigma^2} = -\frac{n}{2} + \frac{1}{2\sigma^2} \sum_{i=1}^n x_i^2$$
+_Es un punto crítico si se cumple lo siguiente:_
+
+$$\frac{\partial\mathcal{l}(\sigma^2|x_1,...,x_n)}{\partial \sigma^2} = 0$$
+_Despejando a_  $\sigma^2$ _queda:_
+
+$${\hat\sigma}^2 = \frac{1}{n} \sum_{i=1}^n x_i^2$$
+
+b. Supongamos que la muestra observada está dada por los datos `x` (que se incluyen en un archivo anexo `x.RData` como parte del examen), ¿Cuál es el estimador de máxima verosimilitud de la varianza para esta muestra?
+
+_Considerando los datos del archivo *x.RData* y la respuesta del inciso anterior, se tiene que el **estimador de máxima verosimilitud** es:_
+
+```{r warning=FALSE}
+# Lectura de las bases de datos
+load("x.RData")
+load("rabbits.RData")
+
+# Estimador de máxima verosimilitud
+sigma_mv <-function(n,x) sum(x^2)/n 
+n <- length(x)
+paste0("n=",n)
+```
+
+_Varianza_
+
+```{r warning=FALSE}
+# Varianza del estimador
+varianza <- sigma_mv(n,x) 
+varianza
+```
+
+c. Aproxima el error estándar de la estimación usando **bootstrap paramétrico** y realiza un histograma de las replicaciones bootstrap.
+
+_En un bootstrap paramétrico se realizan muestras de la función de interés con el estadístico estimado. Para el presente inciso se calculan muestras de la distribución._ 
+
+```{r warning=FALSE}
+sigma_hat <- varianza
+mu <- 0
+
+set.seed(172424) 
+thetaBoot <- function(){
+    # Simulación de los datos (X_1,...X_n) que se distribuyen como N(mu_hat, sigma_hat^2)
+    x_boot <- rnorm(n, mean = 0, sd = sqrt(sigma_hat)) 
+    
+    # Cálculo del sigma(*)
+    mu_boot <- mu
+    (1 / n * sum((x_boot - mu_boot)^2))
+}
+```
+
+_Nos queda que el **Error estándar de la estimación** es_
+
+```{r warning=FALSE}
+# Simulaciones para la estimación.
+sims_boot <- rerun(3000, thetaBoot()) %>% flatten_dbl()
+
+# Error estándar de la estimación
+ERR <- sqrt(1 / 2999 * sum((sims_boot - mean(sigma_hat)) ^ 2))
+ERR
+```
+
+_A continuación, se pueden observar tres representaciones disferentes del histograma de las replicaciones bootstrap_
+
+```{r warning=FALSE}
+# Histograma de la simulación
+hist(sims_boot, col = "indianred1")
+```
+
+```{r warning=FALSE}
+ggplot(mapping = aes(x = sims_boot, y = ..density..)) +  
+  geom_histogram(alpha = 0.5, bins = 100, color = "lightseagreen") +
+  geom_density(size = 1, color = "blue")
+```
+
+```{r warning=FALSE}
+qplot(sims_boot, bins = 20, fill = "salmon") 
+```
+
+#### 1.2 Análisis Bayesiano
+
+a. Continuaremos realizando a continuación inferencia Bayesiana de $\sigma^2$. Comienza especificando una distribución inicial Gamma Inversa, justifica tu elección de los parámetros de la distribución inicial y grafica la función de densidad de probabilidad.
+
+_Sea el *PDF* de una distribución Gamma inversa:_
+
+$$f(x|\alpha, \beta)=\frac{\beta^\alpha}{\Gamma(\alpha)}x^{-\alpha-1}  e^{-\beta/x^2} $$
+_Cuya media queda expresada como_ 
+
+$$\frac{\beta}{\alpha-1} \space para \space \alpha > 1$$
+_y su varianza_
+
+$$\frac{\beta^2}{(\alpha-1)^2(\alpha-2)} \space para \space \alpha>2$$
+
+_Dado que se quiere aproximar una función gamma como la del inciso anterior, y utilizando dicho estimador y el error obtenidos, se proponen los siguientes parámetros de la distribución_
+
+$$\frac{\beta}{\alpha-1} = 131.291$$ 
+$$\frac{\beta^2}{(\alpha-1)^2(\alpha-2)} = 15.17087^2$$
+ 
+_Resolviendo el sistema de ecuaciones tenemos que:_
+
+$\alpha$ = 76.8943
+$\beta$ = 9964.24
+
+```{r warning=FALSE}
+# Parámetroc calculados manualmente
+alpha_1 <- 76.8943
+beta_1 <- 9964.24
+
+# Generación de la función x gamma con los parámetros encontrados
+x_gamma <- rgamma(2000, shape = alpha_1, rate = beta_1) 
+x_igamma <- (1 / x_gamma)
+
+# x_igamma <- data.frame(x_igamma)
+
+x_gamma %>% summary
+```
+
+```{r warning=FALSE}
+x_igamma %>% summary
+```
+
+```{r warning=FALSE}
+
+# Histogramas de la distribución propuesta
+
+histogram(x_igamma, col = "lightseagreen")
+
+ggplot() + geom_histogram(mapping = aes(x_igamma), bins = 100, fill = "lightseagreen")
+
+qplot(x_igamma, geom="histogram", fill = "salmon")
+```
+
+
+b. Calcula analíticamente la distribución posterior.
+
+$$p(\sigma^2|x_1,...,x_n) \propto p(x_1,...,x_n|\sigma^2)p(\sigma^2)$$
+
+$$p(\sigma^2|x_1,...,x_n) \propto \frac{1}{(2\pi\sigma^2)^{n/2}} exp\{{\big( -\frac{1}{2\sigma^2}\sum_{i=1}^n x_i^2\big)}\} \frac{\beta^\alpha}{\Gamma(\alpha)} \frac{1}{(\sigma^2)^{\alpha+1}} exp\{{-\beta/\sigma^2}\}$$
+
+$$p(\sigma^2|x_1,...,x_n) \propto \frac{\beta^\alpha}{(2\pi\sigma^2)^{n/2}\Gamma(\alpha)(\sigma^2)^{\alpha+1}} exp\{{-\frac{1}{\sigma^2}\big( \beta + \frac{1}{2}\sum_{i=1}^n x_i^2\big)}\} \propto \frac{\beta^\alpha}{\Gamma(\alpha)(2\pi)^{n/2}(\sigma^2)^{\alpha+n/2+1}} exp\{{-\frac{\beta_{post}}{\sigma^2}}\}$$
+
+$$\propto (\sigma^2)^{-\alpha_{post}-1} exp\{{-\frac{\beta_{post}}{\sigma^2}}\}$$
+$$\therefore \space \sigma^2|x_1,...,x_n \sim GI(\frac{n}{2} + \alpha,\beta +\frac{1}{2}\sum_{i=1}^n x_i^2)$$
+
+
+c. Realiza un histograma de simulaciones de la distribución posterior y calcula el error estándar de la distribución.
+
+
+```{r warning=FALSE}
+# Definición de la distribución gamma
+xb_gamma <- rgamma(2000,shape = (n/2)+3,rate = sum(x^2)/2+3) 
+xb_igamma <- (1 / xb_gamma) #%>% as.data.frame()
+xb_igamma <- as.data.frame(xb_igamma)
+```
+
+
+```{r warning=FALSE}
+# Histograma de la distribución
+ggplot(xb_igamma, aes(x = xb_igamma)) + 
+  geom_histogram(aes(y = ..density..), fill = "salmon") + 
+  geom_vline(xintercept = mean(xb_igamma$., na.rm = T))
+```
+
+```{r warning=FALSE}
+# Cálculo del error
+ERR_2 <- sqrt(1 / 2000 * sum((xb_igamma - sigma_hat) ^ 2)) 
+ERR_2
+```
+
+d. Ahora elige una distribución inicial uniforme $\sigma^2 \sim U(0.1,300)$ y utiliza JAGS (la función `dunif` especifica una distribución uniforme) para obtener una muestra de simulaciones de la distribución posterior. Recuerda que en JAGS la distribución Normal está parametrizada en términos de la precisión $\nu=\frac{1}{\sigma^2}$. 
+
+```{r warning=FALSE}
+#Modelo
+modelo_normal.bugs <-
+    '
+    model{
+        for(i in 1:n){
+            x[i] ~ dnorm(0, nu)
+        }
+        # inicial
+        nu ~ dunif(0.003333, 10)
+        sigma2 <- 1 / nu
+    }
+    '
+```
+
+```{r warning=FALSE}
+n <- 150
+set.seed(732834)
+cat(modelo_normal.bugs, file = 'modelo_normal.bugs')
+
+# Valores iniciales de los parámetros que utilizará JAGS
+jags_inits <- function(){
+    list( nu = 1 / runif(1, 0.1, 300)) 
+}
+
+jags_fit_uni <- jags(
+    model.file = "modelo_normal.bugs", # modelo JAGS 
+    inits = jags_inits,   # valores iniciales
+    data = list(x = x, n=n),    # datos ordenados como lista
+    parameters.to.save = c("sigma2"), 
+    n.chains = 1,   # número de cadenas
+    n.iter = 10000,    # número de iteraciones
+    n.burnin = 1000,   # calentamiento
+    n.thin = 1  # adelgazamiento
+    )
+```
+
+```{r warning=FALSE}
+jags_fit_uni
+```
+
+```{r warning=FALSE}
+traceplot(jags_fit_uni, varname = c("sigma2"), col = "lightseagreen", ask = F)
+```
+
+_Se puede ver con el *traceplot* que converge la simulación de la distribución del modelo en JAGS._
+
+e. Realiza un histograma, calcula el error estándar y un intervalo de credibilidad del 95% de la distribución; compara los primeros dos resultados con los obtenidos mediante bootstrap.
+
+```{r warning=FALSE}
+hist(jags_fit_uni$BUGSoutput$sims.matrix[,"sigma2"], col = "lightseagreen", main = "Distribución Posterior (simulación)")
+```
+
+```{r warning=FALSE}
+head(jags_fit_uni$BUGSoutput$summary)
+```
+
+_Se puede observar que el intervalo de confianza del 95% de la predicción es (**104.9**, **164.5**)_ 
+_Mientras que, el error estándar en este caso es de *15.273219.*_
+
+_Estos resultados son muy similares a los obtenidos a partir de la simulación con el bootstrap no paramétrico. Esto debido a que ambos parten de simulaciones, pero con distintos métodos._
+
+
+### 2. Muestreo Directo de la Distribución Posterior
+
+Sea la distribución objetivo sin normalizar la siguiente distribución posterior sin normalizar
+$$ p(x|\theta) \times p(\theta) = 0.75 \times e^{-\frac{1}{2}(\theta-3)^2} + 0.25 \times e^{-\frac{1}{4}(\theta-6)^2}$$
+
+Asuma que la distribución propuesta $g(\theta)$ está dada por la distribución normal  $N(4,3^2)$.
+
+Demuestre que la distribución propuesta domina a la distribución objetivo (posterior) como sigue:
+
+a. Calcule de manera analítica el número $M$ mínimo tal que  $M \times g(\theta) \ge p(x|\theta) \times p(\theta)$ para todo $\theta$.
+
+_Se necesita encontrar la constante M tal que cumpla la siguiente ecuación:_
+
+$$M=Sup\frac{p(x_1,...,x_n|\theta) \times p(\theta)}{g(\theta)}$$
+_Por lo tanto, necesitamos el valor máximo de_ $h(\theta)=\frac{p(x|\theta) \times p(\theta)}{g(\theta)}$. _Para esto derivamos_ $h'(\theta)$ _e igualamos a cero_ $h'(\theta)=0$
+
+$$h'(\theta)=3 \sqrt{2\pi}e^{\frac{1}{18}(\theta-4)^2}[-\frac{1}{8}e^{\frac{-1}{4}(\theta-6)^2} (\theta-6)-\frac{3}{4}e^{-\frac{1}{2}(\theta-3)^2}(\theta - 3)] + \frac{1}{3}\sqrt{2\pi}e^{\frac{1}{18}(\theta - 4)^2}[\frac{1}{4}e^{-\frac{1}{4}(\theta - 6)^2} + \frac{3}{4}e^{-\frac{1}{2}(\theta - 3)^2}](\theta - 4)$$
+
+$$0=3 \sqrt{2\pi}e^{\frac{1}{18}(\theta-4)^2}[-\frac{1}{8}e^{\frac{-1}{4}(\theta-6)^2} (\theta-6)-\frac{3}{4}e^{-\frac{1}{2}(\theta-3)^2}(\theta - 3)] + \frac{1}{3}\sqrt{2\pi}e^{\frac{1}{18}(\theta - 4)^2}[\frac{1}{4}e^{-\frac{1}{4}(\theta - 6)^2} + \frac{3}{4}e^{-\frac{1}{2}(\theta - 3)^2}](\theta - 4)$$
+
+_La expresión de arriba no tiene solución análítica, por lo que con métodos numéricos se aproximó la solución de *M*._
+
+$$M=2.925174$$
+
+
+b. Calcule numéricamente el número $M$ mínimo tal que  $M \times g(\theta) \ge p(x|\theta) \times p(\theta)$ para todo $\theta$. (*Sugerencia:* Considere una cuadrícula de valores de $\theta$).
+
+```{r warning=FALSE}
+h <- function(x) ((.75*exp(-.5*(x - 3)^2))+(.25*exp(-.25*(x-6)^2)))/(exp(-(1/18)*(x - 4)^2)/sqrt(2*pi*9))
+curve(h, col = 'lightseagreen', lty = 2, lwd = 2, xlim=c(-2,10), ylim=c(-5,8), ylab='f(x)') 
+abline(h=0) 
+abline(v=0)
+```
+
+
+```{r warning=FALSE}
+#Punto máximo
+Opt=optimize(h, interval=c(2, 4), maximum=TRUE)
+Opt$maximum
+```
+
+```{r warning=FALSE}
+M=h(Opt$maximum)
+op <- par(mfrow = c(1, 1))
+
+# Log de p(x|theta)p(x)
+curve(log((.75*exp(-.5*(x - 3)^2))+(.25*exp(-.25*(x-6)^2))), col = 'lightseagreen', lwd = 2, xlim=c(-2,10), ylim=c(-5,8), ylab='f(x)')
+
+# Log de M*g(x)
+curve(log(M)+log(exp(-(1/18)*(x - 4)^2)/sqrt(2*pi*9)), col = 'salmon', add = TRUE, lwd = 2, xlim=c(-2,10), ylim=c(-5,8), ylab='f(x)')
+```
+
+c. Grafique en la misma gráfica el logaritmo natural de $M \times g(\theta)$ y el logaritmo natural de $p(x|\theta) \times p(\theta)$.
+
+```{r warning=FALSE}
+# Si quisieramos que aparecieran las 3 curvas:
+
+op <- par(mfrow = c(1, 1))
+curve(h, col = 'navyblue', lty = 2, lwd = 2, xlim=c(-2,10), ylim=c(-5,8), ylab='f(x)')
+abline(h=0)
+abline(v=0)
+
+# Log de p(x|theta)p(x)
+curve(log((.75*exp(-.5*(x - 3)^2))+(.25*exp(-.25*(x-6)^2))), col = 'lightseagreen', add = TRUE, lwd = 2, xlim=c(-2,10), ylim=c(-5,8), ylab='f(x)')
+
+# Log de M*g(x)
+curve(log(M)+log(exp(-(1/18)*(x - 4)^2)/sqrt(2*pi*9)), col = 'salmon', add = TRUE, lwd = 2, xlim=c(-2,10), ylim=c(-5,8), ylab='f(x)')
+```
+
+
+```{r warning=FALSE}
+# Posterior
+Post <- function(x)(exp(-(1/18)*(x - 4)^2)/sqrt(2*pi*9))
+
+# Propuesta (g)
+Propuesta <- function(x)(exp(-(1/18)*(x - 4)^2)/sqrt(2*pi*9))
+
+# Aceptación y rechazo
+# Paso 1: Generar número aletorio de al distribución Propuesta (x)
+# Paso 2: Obtener la probabilidad de aceptación
+# Paso 3: Si u<Probabilidad de aceptación, se acepta x
+
+# Como la distribución Propuesta es Normal(4,9):
+Sim_Aceptacion_Rechazo <- function(T){
+  X <- rep(0,T)
+  for (t in 1:T) {
+    Y <- rnorm(1,4,3)
+    alpha <- Post(Y)/Propuesta(Y)
+    if (runif(1) < alpha){
+      X[t] <- Y
+    }
+  }
+  return(X)
+}
+```
+
+A continuación realice lo siguiente:
+
+d. Simule una muestra de tamaño $10,000$ de la distribución propuesta $g(\theta)$ y utilice el método de muestreo por aceptación y rechazo (**acceptance-rejection-sampling**) para generar una muestra de la distribución posterior $p(\theta|x)$. ¿De qué tamaño es esta última muestra?
+
+_En el algoritmo de aceptación y rechazo se tiene la siguiente relación:_
+
+$$Número\ de\ iteraciones =\frac{n}{Probabilidad\ de\ aceptación} $$
+
+_Donde *n* es el número de datos aceptados por el algoritmo._
+
+_En este caso tenemos que_
+
+$$Probabilidad\ de\ aceptación = \frac {\int_{-\infty}^{\infty} \frac{3}{4} exp \{ \frac{-1}{2}(\theta - 3)^2 \} + \frac{1}{4} exp \{ \frac{-1}{4}(\theta - 6)^2 \} d\theta}{\int_{-\infty}^{\infty} \frac{m}{\sqrt{2\pi9}} exp \{\frac{-(\theta - 4)^2 \}}{18}\}d\theta} = 0.4472$$
+
+_Para *m = 6.1855*_
+
+Así, el número de iteraciones queda de la siguiente forma para *n* = 10,000:
+
+$$ Número\ de\ iteraciones = \frac{10,000}{0.4472} = 22,361$$
+
+e. Estime la media y la varianza de la distribución posterior utilizando la muestra generada en el inciso d.
+
+```{r warning=FALSE}
+# Aplicación del algoritmo
+test <- Sim_Aceptacion_Rechazo(10000)
+par(mfrow=c(2,1))
+plot(test, type = "l", col = "lightseagreen")
+```
+
+```{r warning=FALSE}
+hist(test, breaks = 40, col = "salmon")
+```
+
+```{r warning=FALSE}
+# Media estimada
+mean(test)
+```
+
+```{r warning=FALSE}
+# Varianza estimada
+var(test)
+```
+
+```{r warning=FALSE}
+# Verificación de que se trata de la varianza muestral:
+var_muestral=(sum((test-mean(test))^2))/(length(test)-1)
+var_muestral
+```
+
+
+### 3. Algoritmo de Metropolis-Hastings
+
+En el problema 3. de la tarea 19-Tarea-1 de Inferencia Bayesiana se programó un algoritmo de Metropolis-Hastings para el caso en el que los datos provenían de una distribución Normal con media desconocida pero varianza conocida. En el ejercicio de la tarea los saltos se proponían de acuerdo a una distribución normal $N(0, 5)$. Para este ejercicio considerarás las siguientes distribuciones propuestas: 
+
+i). $N(0,0.2)$
+ii). $N(0,5)$ 
+iii). $N(0,20)$
+
+
+a. Genera valores de la distribución posterior usando cada una de las distribuciones propuestas, utiliza la misma distribución inicial y datos observados que utilizaste en la tarea (realiza 6000 pasos de la caminata aleatoria).
+
+```{r warning=FALSE}
+# Generación de la distribución posterior 
+prior <- function(mu = 150, tau = 15){
+  function(theta){
+    dnorm(theta, mu, tau)
+  }
+}
+```
+
+
+```{r warning=FALSE}
+# Parámetros de la distribución
+mu <- 150
+tau <- 15
+mi_prior <- prior(mu, tau)
+```
+
+```{r warning=FALSE}
+likeNorm <- function(S, S2, N, sigma = 20){
+  sigma2 <-  sigma ^ 2    # se eliminan las constantes
+  function(theta){
+    exp(-1 / (2 * sigma2) * (S2 - 2 * theta * S + N * theta ^ 2))
+  }
+}
+```
+
+
+```{r warning=FALSE}
+# Nuevos parámetros para evaluar la distribución
+sigma <- 20 
+N <- 100 
+S <- 13300 # Suma de los puntajes
+S2 <- 1700000 # Suma de las observaciones al cuadrado
+
+mi_like <- likeNorm(S = S, S2 = S2, N = N, sigma = sigma)
+mi_like(150)
+```
+
+```{r warning=FALSE}
+postRelProb <- function(theta){
+  mi_like(theta) * mi_prior(theta)
+}
+```
+
+```{r warning=FALSE}
+# Caso i) para proponer los saltos se utiliza la distribución Normal(0, 0.2).
+caminaAleat_i <- function(theta, sd_prop = 0.2){ # theta: valor actual
+  salto_prop <- rnorm(n = 1, mean = 0 ,sd = sd_prop) # salto propuesto
+  theta_prop <- theta + salto_prop # theta propuesta
+  u <- runif(1) 
+  p_move = min(postRelProb(theta_prop) / postRelProb(theta), 1) # proba de mover
+  if(p_move  > u){
+    return(theta_prop) # aceptar valor propuesto
+  }
+  else{
+    return(theta) # rechazar
+  }
+}
+
+pasos <- 6000
+camino_i <- numeric(pasos) # vector que guardará las simulaciones
+camino_i[1] <- 100 # valor inicial
+
+rechazo = 0
+# Generamos la caminata aleatoria
+for (j in 2:pasos){
+  camino_i[j] <- caminaAleat_i(camino_i[j - 1])
+  rechazo <- rechazo + 1 * (camino_i[j] == camino_i[j - 1]) 
+}
+
+rechazo_i <- rechazo / pasos
+rechazo_i
+```
+
+```{r warning=FALSE}
+caminata_i <- data.frame(pasos = 1:pasos, theta = camino_i)
+```
+
+```{r warning=FALSE}
+# Caso i) para proponer los saltos se utiliza la distribución Normal(0, 5).
+caminaAleat_ii <- function(theta, sd_prop = 5){ # theta: valor actual
+  salto_prop <- rnorm(n = 1, mean = 0 ,sd = sd_prop) # salto propuesto
+  theta_prop <- theta + salto_prop # theta propuesta
+  u <- runif(1) 
+  p_move = min(postRelProb(theta_prop) / postRelProb(theta), 1) # proba de mover
+  if(p_move  > u){
+    return(theta_prop) # aceptar valor propuesto
+  }
+  else{
+    return(theta) # rechazar
+  }
+}
+
+pasos <- 6000
+camino_ii <- numeric(pasos) # vector que guardará las simulaciones
+camino_ii[1] <- 100 # valor inicial
+
+rechazo = 0
+# Generamos la caminata aleatoria
+for (j in 2:pasos){
+  camino_ii[j] <- caminaAleat_ii(camino_ii[j - 1])
+  rechazo <- rechazo + 1 * (camino_ii[j] == camino_ii[j - 1]) 
+}
+
+rechazo_ii <- rechazo / pasos
+rechazo_ii
+```
+
+
+```{r warning=FALSE}
+caminata_ii <- data.frame(pasos = 1:pasos, theta = camino_ii)
+```
+
+```{r warning=FALSE}
+# Caso i) para proponer los saltos se utiliza la distribución Normal(0, 5).
+caminaAleat_iii <- function(theta, sd_prop = 20){ # theta: valor actual
+  salto_prop <- rnorm(n = 1, mean = 0 ,sd = sd_prop) # salto propuesto
+  theta_prop <- theta + salto_prop # theta propuesta
+  u <- runif(1) 
+  p_move = min(postRelProb(theta_prop) / postRelProb(theta), 1) # proba de mover
+  if(p_move  > u){
+    return(theta_prop) # aceptar valor propuesto
+  }
+  else{
+    return(theta) # rechazar
+  }
+}
+
+pasos <- 6000
+camino_iii <- numeric(pasos) # vector que guardará las simulaciones
+camino_iii[1] <- 100 # valor inicial
+
+rechazo = 0
+# Generamos la caminata aleatoria
+for (j in 2:pasos){
+  camino_iii[j] <- caminaAleat_iii(camino_iii[j - 1])
+  rechazo <- rechazo + 1 * (camino_iii[j] == camino_iii[j - 1]) 
+}
+
+rechazo_iii <- rechazo / pasos
+rechazo_iii
+```
+
+
+```{r warning=FALSE}
+caminata_iii <- data.frame(pasos = 1:pasos, theta = camino_iii)
+```
+
+
+b. Grafica los primeros 2000 pasos de la cadena de Markov. 
+
+```{r warning=FALSE}
+ggplot(caminata_i[1:2000, ], aes(x = pasos, y = theta)) +
+  geom_point(size = 0.3, colour = "dodgerblue4") +  geom_path(alpha = 0.5) +
+  ggtitle("Salto propuesto con dist N(0,0.2)")
+```
+
+
+```{r warning=FALSE}
+ggplot(caminata_ii[1:2000, ], aes(x = pasos, y = theta)) +
+  geom_point(size = 0.3, colour = "hotpink1") +  geom_path(alpha = 0.5) +
+  ggtitle("Salto propuesto con dist N(0,5)")
+```
+
+```{r warning=FALSE}
+ggplot(caminata_iii[1:2000, ], aes(x = pasos, y = theta)) +
+  geom_point(size = 0.3, colour = "hotpink1") +  geom_path(alpha = 0.5) +
+  ggtitle("Salto propuesto con dist N(0,20)")
+```
+
+
+c. Comenta acerca de las similitudes/diferencias entre las gráficas correspondientes a cada una de las 3 distribuciones propuestas.
+
+_La caminata en las tres gráficas se aproximan u oscilan entre 130 y 140. Y la diferencia principal es la probabilidad de aceptar o rechazar el nuevo paso, por ejemplo en el tercer caso, se puede observar que en muchos casos el valor de θ permanece con el mismo valor. Sin embargo, en el primer caso, casi siempre se acepta el nuevo paso._
+
+d. Calcula el porcentaje de valores rechazados. 
+
+```{r warning=FALSE}
+rechazo_i
+```
+
+```{r warning=FALSE}
+rechazo_ii
+```
+
+```{r warning=FALSE}
+rechazo_iii
+```
+
+e. Compara los resultados y explica a que se deben las diferencias.
+
+_El porcentaje de rechazo aumenta cuando la varianza es crece, esto es por que una varianza grande nos da una inicial poco informativa._
+
+f. Elimina las primeras 1000 simulaciones (etapa de calentamiento) y genera un histograma de la distribución posterior para cada caso. 
+
+```{r eval=FALSE}
+
+#######################################
+#   D E P U R A R 
+#######################################
+
+# # Caso i)
+caso_1 <- ggplot(filter(caminata_i, pasos > 1000), aes(x = theta)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.8) +
+  ggtitle("N(0,0.2)")
+
+# ggplot(filter(caminata_i, pasos > 1000), aes(x = theta)) +
+#   geom_histogram(aes(y = ..density..), binwidth = 0.8) +
+#   ggtitle("N(0,0.2)")
+
+# Caso ii)
+caso_2 <- ggplot(filter(caminata_ii, pasos > 1000), aes(x = theta)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.8) +
+  ggtitle("N(0,5)")
+
+# Caso iii)
+caso_3 <- ggplot(filter(caminata_ii, pasos > 1000), aes(x = theta)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.8) +
+  ggtitle("N(0,20)")
+
+grid.arrange(caso_1,caso_2,caso_3, ncol = 3)
+```
+
+g. ¿Qué distribución propuesta nos da la representación más cercana a la verdadera distribución posterior? (compara las simulaciones de los tres escenarios de distribución propuesta con la distribución posterior calculada de manera analítica).
+
+```{r warning=FALSE}
+#Media
+sigma ^ 2 * mu / (sigma ^ 2 + N * tau ^ 2) + tau ^ 2 * S / (sigma^2  + N * tau^2) #133.2969
+```
+
+```{r warning=FALSE}
+#Sigma
+sqrt(sigma ^ 2 * tau ^ 2 / (sigma ^ 2 + N * tau ^ 2)) #1.982456
+```
+
+```{r eval=FALSE}
+
+#######################################
+#   D E P U R A R 
+#######################################
+
+# Caso i)
+caso_1 <- caso_1 + stat_function(fun = dnorm, args = list(mean = 133.2969, sd = 1.982456), color = "red")
+
+# Caso ii)
+caso_2 <- caso_2 + stat_function(fun = dnorm, args = list(mean = 133.2969, sd = 1.982456), color = "red")
+
+# Caso iii)
+caso_3 <- caso_3 + stat_function(fun = dnorm, args = list(mean = 133.2969, sd = 1.982456), color = "red")
+
+grid.arrange(caso_1,caso_2,caso_3, ncol = 3)
+```
+
+h. Realiza un histograma de la distribución predictiva posterior.
+
+```{r warning=FALSE}
+# Simulación de valores provenientes de una distribución normal
+x_post <- rnorm(6000, mean = 133.2969, sd = 1.982456)
+x_post <- data.frame(x_post)
+
+ggplot(x_post, aes(x = x_post)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.8, fill = "lightseagreen") + 
+  labs(x = expression(theta))
+```
+
+i. ¿Cuál sería tu predicción para un nuevo valor?
+
+```{r warning=FALSE}
+sum(x_post) / 6000
+```
+
+j. Calcula un intervalo del 95% de probabilidad para la predicción.
+
+```{r warning=FALSE}
+
+```
+
+
+```{r warning=FALSE}
+
+```
+
+### 4. Modelos Jerárquicos
+
+En este ejercicio definirás un modelo jerárquico para la incidencia de tumores en grupos de conejos a los que se suministró una medicina. Se realizaron 71 experimentos distintos utilizando la misma medicina.
+
++ Considerando que cada conejo proviene de un experimento distinto, se desea estudiar $\theta_j$, la probabilidad de desarrollar un tumor en el $j$-ésimo grupo; este parámetro variará de grupo en grupo.
+
+Denotaremos por $y_{ij}$ la observación en el $i$-ésimo conejo perteneciente al $j$-ésimo experimento, $y_{ij}$ puede tomar dos valores: 1 indicando que el conejo desarrolló tumor y 0 en el caso contrario.
+
+$$y_{ij}\sim Bernoulli(\theta_j)$$
+
+Adicionalmente se desea estimar el efecto medio de la medicina a lo largo de los grupos $\mu$, por lo que utilizaremos un modelo jerárquico como sigue:
+
+Asignamos la siguiente distribución incial a los parámetros:
+
+$$\theta_j \sim Beta(a,b)$$
+
+donde
+$$a=\mu\kappa$$
+$$b=(1-\mu)\kappa$$
+
+Finalmente asignamos distribuciones iniciales a los hiperparámetros $\mu$ y $\kappa$,
+
+$$\mu \sim Beta(A_{\mu},B_{\mu})$$
+$$\kappa \sim Gamma(S_{\kappa},R_{\kappa})$$
+
+a. Si piensas en este problema como un lanzamiento de monedas, ¿a qué corresponden las monedas y los lanzamientos?
+
+_Se podría pensar que los lanzamientos representarían el número de conejos; mientras que, el resultado de un lanzamiento de alguna moneda corresponderían a la probabilidad de desarrollar o no un tumor para cada experimento u observación._
+
+La tabla `rabbits.RData` contiene las observaciones de los 71 experimentos, cada renglón corresponde a una observación.
+
+
+b. Ajusta un modelo jerárquico como el descrito arriba utilizando una distribución inicial $Beta(1,1)$ y una $Gamma(1,0.1)$ para $\mu$ y $\kappa$, respectivamente. Puedes hacerlo manualmente o puedes utilizar JAGS.
+
+```{r warning=FALSE}
+# Definición del modelo
+rabbits_model.txt <-
+    '
+    model{
+      for(t in 1:N) {
+        x[t] ~ dbern(theta[coin[t]])
+      }
+      for(j in 1:nCoins){
+        theta[j] ~ dbeta(a, b)
+      }
+      a <- mu * kappa
+      b <- (1 - mu) * kappa
+      mu ~ dbeta(1, 1)
+      kappa ~ dgamma(1, 0.1)
+    }
+    '
+cat(rabbits_model.txt, file = 'rabbits_model.bugs')
+
+# variables a utilizar
+x <- rabbits$tumor 
+coin <- rabbits$experiment
+
+# Datos y valores iniciales para JAGS
+jags.inits <- function(){
+  list("mu" = runif(1),
+    "kappa" = runif(1, 5, 20))
+}
+
+# Ajuste del modelo
+jags_fit <- jags(
+  model.file = "rabbits_model.bugs",    # modelo de JAGS
+  inits = jags.inits,   # valores iniciales
+  data = list(x = x, coin = coin, nCoins = 71,  N = 1810),    # lista con los datos
+  parameters.to.save = c("mu", "kappa", "theta"),  # parámetros
+  n.chains = 3,   # cadenas
+  n.iter = 1000,    # iteraciones
+  n.burnin = 100   # calentamiento de la cadena
+  )
+```
+
+
+c. Realiza histogramas de las distribuciones posteriores marginales de $\mu$ y $\kappa$. Comenta tus resultados.
+
+```{r warning=FALSE}
+sims_df <- data.frame(n_sim = 1:jags_fit$BUGSoutput$n.sims,
+  jags_fit$BUGSoutput$sims.matrix) %>% 
+  dplyr::select(-deviance) %>%
+  gather(parametro, value, -n_sim)
+
+# Histogramas de la distribución posterior
+ggplot(subset(sims_df, parametro  %in% c('mu') ), aes(x = value)) +
+  geom_histogram(alpha = 0.8, fill = "lightseagreen") + 
+  facet_wrap(~ parametro)
+```
+
+```{r warning=FALSE}
+ggplot(subset(sims_df, parametro  %in% c('kappa') ), aes(x = value)) +
+  geom_histogram(alpha = 0.8, fill = "salmon") + facet_wrap(~ parametro)
+```
+
+_Se puede observar que las distribuciones presentan un sesgo, la segunda uno muy notorio a la derecha._
+
+d. Ajusta un nuevo modelo utilizando las distribuciones iniciales $Beta(10,10)$ y $Gamma(0.51,0.01)$ para $\mu$ y $\kappa$, respectivamente (lo demás quedará igual). 
+
+```{r warning=FALSE}
+# Modelo con diferentes distribuciones iniciales
+rabbits_model.txt <-
+    '
+    model{
+      for(t in 1:N) {
+        x[t] ~ dbern(theta[coin[t]])
+      }
+      for(j in 1:nCoins){
+        theta[j] ~ dbeta(a, b)
+      }
+      a <- mu * kappa
+      b <- (1 - mu) * kappa
+      mu ~ dbeta(10, 10)
+      kappa ~ dgamma(0.51, 0.01)
+    }
+    '
+cat(rabbits_model.txt, file = 'rabbits_model.bugs')
+
+# Variables a utilizar
+x <- rabbits$tumor 
+coin <- rabbits$experiment
+
+# Valores iniciales del modelo
+jags.inits <- function(){
+  list("mu" = runif(1),
+    "kappa" = runif(1, 5, 20))
+}
+
+jags_fit <- jags(
+  model.file = "rabbits_model.bugs",    # archivo del modelo de JAGS
+  inits = jags.inits,   # valores iniciales
+  data = list(x = x, coin = coin, nCoins = 71,  N = 1810),    # datos
+  parameters.to.save = c("mu", "kappa", "theta"), # Parámetro nuevos
+  n.chains = 3,   # cadenas
+  n.iter = 1000,  # iteraciones
+  n.burnin = 100  # calentamiento
+  )
+```
+
+e. Realiza una gráfica con las medias posteriores de los parámetros $\theta_j$ bajo los dos escenarios de distribuciones iniciales. En el eje horizontal grafica las medias posteriores del modelo ajustado en el inciso b. y en el eje vertical las medias posteriores del modelo ajustado en en inciso d. ¿Cómo se comparan? ¿A qué se deben las diferencias?
+
+```{r warning=FALSE}
+sims_df <- data.frame(n_sim = 1:jags_fit$BUGSoutput$n.sims,
+  jags_fit$BUGSoutput$sims.matrix) %>% 
+  dplyr::select(-deviance) %>%
+  gather(parametro, value, -n_sim)
+
+ggplot(subset(sims_df, parametro  %in% c('mu') ), aes(x = value)) +
+  geom_histogram(alpha = 0.8, fill = "lightseagreen") + facet_wrap(~ parametro)
+```
+
+```{r warning=FALSE}
+ggplot(subset(sims_df, parametro  %in% c('kappa') ), aes(x = value)) +
+  geom_histogram(alpha = 0.8, fill = "salmon") + 
+  facet_wrap(~ parametro)
+```
+
+```{r warning=FALSE}
+
+```
